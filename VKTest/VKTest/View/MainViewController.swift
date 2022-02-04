@@ -135,9 +135,9 @@ private extension MainViewController {
             submitButton.topAnchor.constraint(equalTo: urlTextField.bottomAnchor, constant: 30.0),
             
             backwardsButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 115.0),
-            backwardsButton.trailingAnchor.constraint(equalTo: playPauseButton.leadingAnchor, constant: -30.0),
             backwardsButton.topAnchor.constraint(equalTo: playerView.bottomAnchor, constant: 20),
             
+            playPauseButton.leadingAnchor.constraint(equalTo: backwardsButton.trailingAnchor, constant: 30.0),
             playPauseButton.topAnchor.constraint(equalTo: backwardsButton.topAnchor),
             
             forwardsButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 30.0),
