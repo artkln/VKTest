@@ -20,29 +20,97 @@ final class MainViewController: UIViewController {
     private let forwardsButton = UIButton()
     private let backwardsButton = UIButton()
     private let fullScreenButton = UIButton()
+    private let activityIndicator = UIActivityIndicatorView(style: .large)
     
     private var player = AVPlayer()
     private var playerLayer = AVPlayerLayer()
     private var isVideoPlaying = false
-    
+
+    // MARK: - Deinitialization
+
+    deinit {
+        player.currentItem?.removeObserver(self, forKeyPath: #keyPath(AVPlayerItem.status))
+    }
+
     // MARK: - UIViewController
 
     override func viewDidLoad() {
         super.viewDidLoad()
         
         urlTextField.delegate = self
-        let tap = UITapGestureRecognizer(target: self, action: #selector(UIInputViewController.dismissKeyboard))
+        let tap = UITapGestureRecognizer(
+            target: self,
+            action: #selector(UIInputViewController.dismissKeyboard)
+        )
         view.addGestureRecognizer(tap)
 
-        view.addSubviews(infoLabel, submitButton, urlTextField, playerView, playPauseButton, backwardsButton, forwardsButton, fullScreenButton)
-        
-        setupConstraints()
         configureAppearance()
     }
     
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         playerLayer.frame = playerView.bounds
+    }
+    
+    override func observeValue(forKeyPath keyPath: String?,
+                               of object: Any?,
+                               change: [NSKeyValueChangeKey : Any]?,
+                               context: UnsafeMutableRawPointer?) {
+        if keyPath == #keyPath(AVPlayerItem.status),
+           let currentItem = player.currentItem {
+            do {
+                try checkCurrentItemStatus(currentItem.status)
+            } catch let error as PlayerError {
+                showAlert(with: error.description)
+            } catch let error {
+                showAlert(with: error.localizedDescription)
+            }
+
+            activityIndicator.stopAnimating()
+        }
+    }
+    
+    // MARK: - Private methods
+    
+    private func checkCurrentItemStatus(_ status: AVPlayerItem.Status) throws {
+        switch status {
+        case .readyToPlay:
+            activateButtons()
+        case .failed:
+            deactivateButtons(submitDeactivationNeeded: false)
+            throw PlayerError.wrongURL
+        case .unknown:
+            deactivateButtons(submitDeactivationNeeded: false)
+            throw PlayerError.unknown
+        @unknown default:
+            deactivateButtons(submitDeactivationNeeded: false)
+            throw PlayerError.unknown
+        }
+    }
+
+    private func configurePlayer() throws {
+        guard let inputText = urlTextField.text,
+                  !inputText.isEmpty else {
+            throw PlayerError.emptyInput
+        }
+
+        guard let URL = URL(string: inputText) else {
+            throw PlayerError.notURLConvertible
+        }
+
+        player = AVPlayer(url: URL)
+
+        player.currentItem?.addObserver(
+            self,
+            forKeyPath: #keyPath(AVPlayerItem.status),
+            options: [.old, .new],
+            context: nil
+        )
+
+        playerLayer = AVPlayerLayer(player: player)
+        playerLayer.videoGravity = .resize
+        
+        playerView.layer.addSublayer(playerLayer)
     }
 
 }
@@ -55,24 +123,29 @@ private extension MainViewController {
         view.backgroundColor = .white
 
         configureInfoLabel()
-        configurePlayerView()
         configureTextField()
-        configurePlayPauseButton()
         configureSubmitButton()
+        configurePlayerView()
+        configureActivityIndicator()
+        configurePlayPauseButton()
         configureBackwardsButton()
         configureForwardsButton()
         configureFullScreenButton()
+
+        deactivateButtons(submitDeactivationNeeded: false)
     }
     
     func configureInfoLabel() {
         infoLabel.text = "Введите URL видеоресурса:"
         infoLabel.textAlignment = .center
         infoLabel.translatesAutoresizingMaskIntoConstraints = false
-    }
-    
-    func configurePlayerView() {
-        playerView.backgroundColor = .black
-        playerView.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(infoLabel)
+        
+        NSLayoutConstraint.activate([
+            infoLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            infoLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 50.0)
+        ])
     }
     
     func configureTextField() {
@@ -80,72 +153,138 @@ private extension MainViewController {
         urlTextField.layer.cornerRadius = 5.0
         urlTextField.layer.borderWidth = 1.0
         urlTextField.layer.borderColor = UIColor.black.cgColor
+        
+        view.addSubview(urlTextField)
+        
+        NSLayoutConstraint.activate([
+            urlTextField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            urlTextField.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 30.0),
+            urlTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 40.0),
+            urlTextField.heightAnchor.constraint(equalToConstant: 30.0)
+        ])
+    }
+
+    func configureSubmitButton() {
+        submitButton.setTitle("Загрузить", for: .normal)
+        submitButton.addTarget(self, action: #selector(submitPressed), for: .touchUpInside)
+        submitButton.translatesAutoresizingMaskIntoConstraints = false
+        submitButton.setTitleColor(.white, for: .normal)
+        submitButton.backgroundColor = .systemBlue
+        submitButton.layer.cornerRadius = 5.0
+        
+        view.addSubview(submitButton)
+        
+        NSLayoutConstraint.activate([
+            submitButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            submitButton.topAnchor.constraint(equalTo: urlTextField.bottomAnchor, constant: 30.0),
+            submitButton.heightAnchor.constraint(equalToConstant: 30.0),
+            submitButton.widthAnchor.constraint(equalToConstant: 100.0)
+        ])
+    }
+    
+    func configurePlayerView() {
+        playerView.backgroundColor = .black
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(playerView)
+        
+        NSLayoutConstraint.activate([
+            playerView.topAnchor.constraint(equalTo: submitButton.bottomAnchor, constant: 30),
+            playerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            playerView.widthAnchor.constraint(equalTo: playerView.heightAnchor, multiplier: 16.0/9.0)
+        ])
+    }
+    
+    func configureActivityIndicator() {
+        activityIndicator.hidesWhenStopped = true
+        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
+
+        playerView.addSubview(activityIndicator)
+        
+        NSLayoutConstraint.activate([
+            activityIndicator.centerXAnchor.constraint(equalTo: playerView.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: playerView.centerYAnchor)
+        ])
     }
     
     func configurePlayPauseButton() {
         playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
         playPauseButton.addTarget(self, action: #selector(playPausePressed), for: .touchUpInside)
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
-    }
-    
-    func configureSubmitButton() {
-        submitButton.setTitle("Загрузить", for: .normal)
-        submitButton.addTarget(self, action: #selector(submitPressed), for: .touchUpInside)
-        submitButton.translatesAutoresizingMaskIntoConstraints = false
-        submitButton.setTitleColor(.systemBlue, for: .normal)
+        
+        view.addSubview(playPauseButton)
+        
+        NSLayoutConstraint.activate([
+            playPauseButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            playPauseButton.topAnchor.constraint(equalTo: playerView.bottomAnchor, constant: 20)
+        ])
     }
     
     func configureBackwardsButton() {
         backwardsButton.setImage(UIImage(systemName: "gobackward.15"), for: .normal)
         backwardsButton.addTarget(self, action: #selector(backwardsPressed), for: .touchUpInside)
         backwardsButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(backwardsButton)
+        
+        NSLayoutConstraint.activate([
+            backwardsButton.trailingAnchor.constraint(equalTo: playPauseButton.leadingAnchor, constant: -30.0),
+            backwardsButton.topAnchor.constraint(equalTo: playPauseButton.topAnchor)
+        ])
     }
 
     func configureForwardsButton() {
         forwardsButton.setImage(UIImage(systemName: "goforward.15"), for: .normal)
         forwardsButton.addTarget(self, action: #selector(forwardsPressed), for: .touchUpInside)
         forwardsButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(forwardsButton)
+        
+        NSLayoutConstraint.activate([
+            forwardsButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 30.0),
+            forwardsButton.topAnchor.constraint(equalTo: playPauseButton.topAnchor)
+        ])
     }
     
     func configureFullScreenButton() {
         fullScreenButton.setImage(UIImage(systemName: "square.filled.on.square"), for: .normal)
         fullScreenButton.addTarget(self, action: #selector(fullScreenPressed), for: .touchUpInside)
         fullScreenButton.translatesAutoresizingMaskIntoConstraints = false
-    }
-    
-    func setupConstraints() {
-        let safeArea = view.safeAreaLayoutGuide
+        
+        view.addSubview(fullScreenButton)
         
         NSLayoutConstraint.activate([
-            playerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            playerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            playerView.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
-            playerView.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
-            playerView.widthAnchor.constraint(equalTo: playerView.heightAnchor, multiplier: 16.0/9.0),
-            
-            infoLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            infoLabel.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 50.0),
-            
-            urlTextField.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            urlTextField.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 30.0),
-            urlTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 50.0),
-            urlTextField.heightAnchor.constraint(equalToConstant: 30.0),
-            
-            submitButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            submitButton.topAnchor.constraint(equalTo: urlTextField.bottomAnchor, constant: 30.0),
-            
-            backwardsButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 115.0),
-            backwardsButton.topAnchor.constraint(equalTo: playerView.bottomAnchor, constant: 20),
-            
-            playPauseButton.leadingAnchor.constraint(equalTo: backwardsButton.trailingAnchor, constant: 30.0),
-            playPauseButton.topAnchor.constraint(equalTo: backwardsButton.topAnchor),
-            
-            forwardsButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 30.0),
-            forwardsButton.topAnchor.constraint(equalTo: playPauseButton.topAnchor),
-            
-            fullScreenButton.leadingAnchor.constraint(equalTo: forwardsButton.trailingAnchor, constant: 30.0),
-            fullScreenButton.topAnchor.constraint(equalTo: forwardsButton.topAnchor)
+            fullScreenButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20.0),
+            fullScreenButton.topAnchor.constraint(equalTo: playPauseButton.topAnchor)
         ])
+    }
+
+    func showAlert(with description: String) {
+        let alert = UIAlertController(title: "Ошибка", message: description, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+        present(alert, animated: true)
+    }
+    
+    func activateButtons() {
+        submitButton.isEnabled = true
+        submitButton.alpha = 1
+        backwardsButton.isEnabled = true
+        playPauseButton.isEnabled = true
+        forwardsButton.isEnabled = true
+        fullScreenButton.isEnabled = true
+    }
+    
+    func deactivateButtons(submitDeactivationNeeded: Bool) {
+        if submitDeactivationNeeded {
+            submitButton.isEnabled = false
+            submitButton.alpha = 0.5
+        }
+
+        backwardsButton.isEnabled = false
+        playPauseButton.isEnabled = false
+        forwardsButton.isEnabled = false
+        fullScreenButton.isEnabled = false
     }
 
 }
@@ -194,16 +333,16 @@ extension MainViewController {
     }
     
     func submitPressed(_ sender: Any) {
-        guard let URL = URL(string: urlTextField.text ?? "") else {
-            return
+        do {
+            try configurePlayer()
+        } catch let error as PlayerError {
+            showAlert(with: error.description)
+        } catch let error {
+            showAlert(with: error.localizedDescription)
         }
-
-        player = AVPlayer(url: URL)
-
-        playerLayer = AVPlayerLayer(player: player)
-        playerLayer.videoGravity = .resize
         
-        playerView.layer.addSublayer(playerLayer)
+        deactivateButtons(submitDeactivationNeeded: true)
+        activityIndicator.startAnimating()
     }
     
     func dismissKeyboard() {
@@ -214,15 +353,21 @@ extension MainViewController {
         guard let URL = URL(string: urlTextField.text ?? "") else {
             return
         }
-        player.pause()
+
         let currentTime = player.currentTime()
-        
         let vc = FullScreenPlayerViewController(url: URL, currentTime: currentTime)
         vc.modalPresentationStyle = .fullScreen
+        vc.onFullScreenClosed = { [weak self] fullScreenTime in
+            self?.player.seek(to: fullScreenTime)
+        }
+
         self.present(vc, animated: true, completion: nil)
+        player.pause()
     }
 
 }
+
+// MARK: - UITextFieldDelegate
 
 extension MainViewController: UITextFieldDelegate {
     

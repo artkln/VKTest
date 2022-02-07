@@ -9,7 +9,11 @@ import UIKit
 import AVFoundation
 
 final class FullScreenPlayerViewController: UIViewController {
+
+    // MARK: - Properties
     
+    var onFullScreenClosed: ((CMTime) -> Void)?
+
     // MARK: - Private properties
 
     private let playerView = UIView()
@@ -26,7 +30,6 @@ final class FullScreenPlayerViewController: UIViewController {
     private var player = AVPlayer()
     private var playerLayer = AVPlayerLayer()
     private var isVideoPlaying = false
-    private var playerItemContext = 0
     private var currentTime = CMTime()
     
     // MARK: - Initialization
@@ -34,11 +37,13 @@ final class FullScreenPlayerViewController: UIViewController {
     convenience init(url: URL, currentTime: CMTime) {
         self.init(nibName: nil, bundle: nil)
         self.currentTime = currentTime
-        configurePlayer(url: url)
+        configurePlayer(with: url)
     }
 
+    // MARK: - Deinitialization
+
     deinit {
-        player.currentItem?.removeObserver(self, forKeyPath: "duration")
+        player.currentItem?.removeObserver(self, forKeyPath: #keyPath(AVPlayerItem.status))
     }
 
     // MARK: - UIViewController
@@ -49,11 +54,6 @@ final class FullScreenPlayerViewController: UIViewController {
         let tap = UITapGestureRecognizer(target: self, action: #selector(onTap))
         view.addGestureRecognizer(tap)
 
-        topContainerView.addSubviews(currentTimeLabel, durationLabel, timeSlider)
-        bottomContainerView.addSubviews(playPauseButton, backwardsButton, forwardsButton, dismissButton)
-        view.addSubviews(playerView, bottomContainerView, topContainerView)
-        
-        setupConstraints()
         configureAppearance()
     }
 
@@ -66,10 +66,11 @@ final class FullScreenPlayerViewController: UIViewController {
                                of object: Any?,
                                change: [NSKeyValueChangeKey : Any]?,
                                context: UnsafeMutableRawPointer?) {
-        if keyPath == "duration",
-           let curentItem = player.currentItem,
-           curentItem.duration.seconds > 0.0 {
-            durationLabel.text = getStringTime(from: player.currentItem!.duration)
+        if keyPath == #keyPath(AVPlayerItem.status),
+           let currentItem = player.currentItem,
+           currentItem.status == .readyToPlay {
+            durationLabel.text = getStringTime(from: currentItem.duration)
+            player.seek(to: currentTime)
         }
     }
 
@@ -79,11 +80,15 @@ final class FullScreenPlayerViewController: UIViewController {
 
 private extension FullScreenPlayerViewController {
 
-    func configurePlayer(url: URL) {
+    func configurePlayer(with url: URL) {
         player = AVPlayer(url: url)
 
-        player.currentItem?.addObserver(self, forKeyPath: "duration", options: [.new, .initial], context: nil)
-        player.addObserver(self, forKeyPath: #keyPath(AVPlayer.status), options: [.old, .new], context: &playerItemContext)
+        player.currentItem?.addObserver(
+            self,
+            forKeyPath: #keyPath(AVPlayerItem.status),
+            options: [.old, .new],
+            context: nil
+        )
         addTimeObserver()
 
         playerLayer = AVPlayerLayer(player: player)
@@ -94,7 +99,10 @@ private extension FullScreenPlayerViewController {
 
     func addTimeObserver() {
         let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        _ = player.addPeriodicTimeObserver(forInterval: interval, queue: DispatchQueue.main) { [weak self] time in
+        _ = player.addPeriodicTimeObserver(
+            forInterval: interval,
+            queue: DispatchQueue.main
+        ) { [weak self] time in
             guard let currentItem = self?.player.currentItem else {
                 return
             }
@@ -121,20 +129,23 @@ private extension FullScreenPlayerViewController {
     
 }
 
+// MARK: - Appearance
+
 private extension FullScreenPlayerViewController {
     
     func configureAppearance() {
         view.backgroundColor = .clear
 
         configurePlayerView()
-        configureContainerViews()
+        configureTopContainerView()
+        configureBottomContainerView()
         configurePlayPauseButton()
         configureBackwardsButton()
         configureForwardsButton()
         configureDismissButton()
+        configureSlider()
         configureCurrentTimeLabel()
         configureDurationLabel()
-        configureSlider()
         
         DispatchQueue.main.asyncAfter(deadline: DispatchTime.now() + 5) {
             UIView.animate(withDuration: 0.3) {
@@ -147,101 +158,137 @@ private extension FullScreenPlayerViewController {
     func configurePlayerView() {
         playerView.backgroundColor = .black
         playerView.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(playerView)
+        
+        NSLayoutConstraint.activate([
+            playerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            playerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            playerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            playerView.widthAnchor.constraint(equalTo: playerView.heightAnchor, multiplier: 16.0/9.0)
+        ])
     }
     
-    func configureContainerViews() {
+    func configureTopContainerView() {
         topContainerView.backgroundColor = .systemGray4
         topContainerView.translatesAutoresizingMaskIntoConstraints = false
-
+        
+        view.addSubview(topContainerView)
+        
+        NSLayoutConstraint.activate([
+            topContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topContainerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topContainerView.topAnchor.constraint(equalTo: view.topAnchor),
+            topContainerView.heightAnchor.constraint(equalToConstant: 60.0)
+        ])
+    }
+    
+    func configureBottomContainerView() {
         bottomContainerView.backgroundColor = .systemGray4
         bottomContainerView.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(bottomContainerView)
+        
+        NSLayoutConstraint.activate([
+            bottomContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomContainerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomContainerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottomContainerView.heightAnchor.constraint(equalToConstant: 60.0)
+        ])
     }
     
     func configurePlayPauseButton() {
         playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
         playPauseButton.addTarget(self, action: #selector(playPausePressed), for: .touchUpInside)
         playPauseButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        bottomContainerView.addSubview(playPauseButton)
+        
+        NSLayoutConstraint.activate([
+            playPauseButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor),
+            playPauseButton.centerXAnchor.constraint(equalTo: bottomContainerView.centerXAnchor)
+        ])
     }
     
     func configureBackwardsButton() {
         backwardsButton.setImage(UIImage(systemName: "gobackward.15"), for: .normal)
         backwardsButton.addTarget(self, action: #selector(backwardsPressed), for: .touchUpInside)
         backwardsButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        bottomContainerView.addSubview(backwardsButton)
+        
+        NSLayoutConstraint.activate([
+            backwardsButton.trailingAnchor.constraint(equalTo: playPauseButton.leadingAnchor, constant: -30.0),
+            backwardsButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor)
+        ])
     }
 
     func configureForwardsButton() {
         forwardsButton.setImage(UIImage(systemName: "goforward.15"), for: .normal)
         forwardsButton.addTarget(self, action: #selector(forwardsPressed), for: .touchUpInside)
         forwardsButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        bottomContainerView.addSubview(forwardsButton)
+        
+        NSLayoutConstraint.activate([
+            forwardsButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 30.0),
+            forwardsButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor)
+        ])
     }
     
     func configureDismissButton() {
         dismissButton.setImage(UIImage(systemName: "clear.fill"), for: .normal)
         dismissButton.addTarget(self, action: #selector(dismissPressed), for: .touchUpInside)
         dismissButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        bottomContainerView.addSubview(dismissButton)
+        
+        NSLayoutConstraint.activate([
+            dismissButton.trailingAnchor.constraint(equalTo: bottomContainerView.trailingAnchor, constant: -20.0),
+            dismissButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor)
+        ])
     }
-    
+
+    func configureSlider() {
+        timeSlider.value = 0.0
+        timeSlider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
+        timeSlider.translatesAutoresizingMaskIntoConstraints = false
+        
+        topContainerView.addSubview(timeSlider)
+        
+        NSLayoutConstraint.activate([
+            timeSlider.centerYAnchor.constraint(equalTo: topContainerView.centerYAnchor)
+        ])
+    }
+
     func configureCurrentTimeLabel() {
         currentTimeLabel.text = "00:00"
         currentTimeLabel.textAlignment = .right
         currentTimeLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        topContainerView.addSubview(currentTimeLabel)
+        
+        NSLayoutConstraint.activate([
+            currentTimeLabel.centerYAnchor.constraint(equalTo: topContainerView.centerYAnchor),
+            currentTimeLabel.leadingAnchor.constraint(equalTo: topContainerView.leadingAnchor, constant: 8.0),
+            currentTimeLabel.widthAnchor.constraint(equalToConstant: 60.0),
+            currentTimeLabel.trailingAnchor.constraint(equalTo: timeSlider.leadingAnchor, constant: -20.0)
+        ])
     }
     
     func configureDurationLabel() {
         durationLabel.text = "00:00"
         durationLabel.textAlignment = .left
         durationLabel.translatesAutoresizingMaskIntoConstraints = false
-    }
-    
-    func configureSlider(){
-        timeSlider.value = 0.0
-        timeSlider.addTarget(self, action: #selector(sliderValueChanged), for: .valueChanged)
-        timeSlider.translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    func setupConstraints() {
-        let safeArea = view.safeAreaLayoutGuide
+        
+        topContainerView.addSubview(durationLabel)
         
         NSLayoutConstraint.activate([
-            playerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            playerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            playerView.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
-            playerView.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
-            playerView.widthAnchor.constraint(equalTo: playerView.heightAnchor, multiplier: 16.0/9.0),
-            
-            bottomContainerView.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
-            bottomContainerView.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
-            bottomContainerView.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor),
-            bottomContainerView.heightAnchor.constraint(equalToConstant: 60.0),
-            
-            topContainerView.leadingAnchor.constraint(equalTo: safeArea.leadingAnchor),
-            topContainerView.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor),
-            topContainerView.topAnchor.constraint(equalTo: safeArea.topAnchor),
-            topContainerView.heightAnchor.constraint(equalToConstant: 60.0),
-            
-            backwardsButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 115.0),
-            backwardsButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor),
-            
-            playPauseButton.leadingAnchor.constraint(equalTo: backwardsButton.trailingAnchor, constant: 30.0),
-            playPauseButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor),
-            
-            forwardsButton.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 30.0),
-            forwardsButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor),
-            
-            dismissButton.leadingAnchor.constraint(equalTo: forwardsButton.trailingAnchor, constant: 30.0),
-            dismissButton.centerYAnchor.constraint(equalTo: bottomContainerView.centerYAnchor),
-            
-            timeSlider.centerYAnchor.constraint(equalTo: topContainerView.centerYAnchor),
-            
-            currentTimeLabel.centerYAnchor.constraint(equalTo: topContainerView.centerYAnchor),
-            currentTimeLabel.leadingAnchor.constraint(equalTo: topContainerView.leadingAnchor, constant: 8.0),
-            currentTimeLabel.widthAnchor.constraint(equalToConstant: 60.0),
-            currentTimeLabel.trailingAnchor.constraint(equalTo: timeSlider.leadingAnchor, constant: -20.0),
-            
             durationLabel.centerYAnchor.constraint(equalTo: topContainerView.centerYAnchor),
             durationLabel.leadingAnchor.constraint(equalTo: timeSlider.trailingAnchor, constant: 20.0),
             durationLabel.widthAnchor.constraint(equalToConstant: 60.0),
-            durationLabel.trailingAnchor.constraint(equalTo: topContainerView.trailingAnchor, constant: -8.0),
+            durationLabel.trailingAnchor.constraint(equalTo: topContainerView.trailingAnchor, constant: -8.0)
         ])
     }
     
@@ -310,6 +357,8 @@ extension FullScreenPlayerViewController {
     
     func dismissPressed(_ sender: Any) {
         dismiss(animated: true, completion: nil)
+        player.pause()
+        onFullScreenClosed?(player.currentTime())
     }
 
 }
